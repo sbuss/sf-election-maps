@@ -24,7 +24,6 @@ def parse_master_lookup(master_lookup_filename):
     # Is_Provisional        83       83      1
     #
     # More information can be found at
-    # https://sfelections.org/results/20180605/data/BallotImageRCVhelp.pdf
     # https://sfelections.org/results/20180605/data/20180627/20180627_masterlookup.txt
     # https://sfelections.sfgov.org/june-5-2018-election-results-detailed-reports
     names = [
@@ -55,6 +54,7 @@ def parse_ballot_image(ballot_image_filename):
             department of elections.
     Returns a pandas dataframe with the ballot image data.
     """
+    # https://sfelections.org/results/20180605/data/BallotImageRCVhelp.pdf
     # https://sfelections.org/results/20180605/data/20180627/20180627_ballotimage.txt
 
     # Field            startcol stopcol fieldlen
@@ -102,3 +102,100 @@ def get_supervisor_votes(district, master_lookup_df, ballot_image_df):
     contest_name = "Board of Supervisors, District %d" % district
     return get_votes_for_contest(
         contest_name, master_lookup_df, ballot_image_df)
+
+
+def run_rcv_for_contest(
+        contest_name, master_lookup_df, ballot_image_df, threshold=0.5):
+    """Run RCV elimination for a given contest.
+
+    Returns a tuple of a list of dataframes with the votes redistributed. The
+    0th dataframe is all votes (1st dataframe is after the first round, etc),
+    and the winner candidate id.
+    """
+    votes = get_votes_for_contest(
+        contest_name, master_lookup_df, ballot_image_df)
+    votes = votes.copy(deep=True)
+    # Rules:
+    # 1. Eliminate last place and redistribute votes until one candidate has
+    #    > threshold votes.
+    # 2. If a redistributed vote goes to an eliminated candidate, discard and
+    #    try again.
+    # 3. Overvotes invalidate a ballot but only if reached. For example, voting
+    #    for one person in first choice, and two people in second choice only
+    #    invalidates it if the first choice is eliminated.
+    # 4. Undervotes get skipped over, they're treated very similarly to
+    #    already-eliminated candidates. An undervote is a blank choice.
+    # 5. When a ballot gets redistributed and the next choice is an
+    #    already-eliminated candidate, do not assign the ballot to that
+    #    candidate, but skip that choice and do the next one.
+    # 6. When the next choice is the same candidate (eg Alice #1, Alice #2,
+    #    Alice #3), skip them as in #5.
+
+    exhausted = set()
+    # The data looks like this:
+    # Id      Contest_Id  Pref_Voter_Id   Precinct_Id Vote_Rank   Candidate_Id    Over_Vote   Under_Vote
+    # 762048  21          13525           281         1           188             0           0
+    # 762049  21          13525           281         2           0               0           1
+    # 762050  21          13525           281         3           0               0           1
+    # 762051  21          13526           281         1           188             0           0
+    # 762052  21          13526           281         2           186             0           0
+    # 762053  21          13526           281         3           0               0           1
+    # That means voter 13525 voted *only* for candidate 188, while voter 13526
+    # voted for candidates 188 #1 and 186 #2.
+    winner = None
+
+    rounds = [votes]
+    # First remove all completely undervoted ballots. That's people who didn't
+    # vote for anyone at all.
+    _is_all_undervote = votes.groupby('Pref_Voter_Id')['Under_Vote'].all()
+    all_undervote_voter_ids = _is_all_undervote[_is_all_undervote].index
+    votes = votes[~votes.Pref_Voter_Id.isin(all_undervote_voter_ids)]
+    rounds.append(votes)
+    #votes = votes[votes.Under_Vote != 1]
+    #votes = votes[votes.Over_Vote != 1]
+
+    # Start the ranking
+    while not winner:
+        print("Round %d" % len(rounds))
+        keep_going = True
+        while keep_going:
+            keep_going = False
+            # Look at the highest rank vote for each voter.
+            top_votes = \
+                votes.sort_values('Vote_Rank').groupby('Pref_Voter_Id').first()
+
+            # If the top choice is an undervote, drop it and keep going
+            undervotes = top_votes[top_votes['Under_Vote'] == 1]
+            if len(undervotes) > 0:
+                print("%d undervotes" % len(undervotes))
+                keep_going = True
+                ir = undervotes.iterrows()
+                row = ir.next()
+                x = votes[(votes.Pref_Voter_Id == row[0]) &
+                          (votes.Vote_Rank == row[1].Vote_Rank)]
+                for row in ir:
+                    x = x | votes[(votes.Pref_Voter_Id == row[0]) &
+                                  (votes.Vote_Rank == row[1].Vote_Rank)]
+                votes = votes.drop(x.index, axis=0)
+
+            overvotes = top_votes[top_votes['Over_Vote'] == 1]
+            if len(overvotes) > 0:
+                print("%d overvotes" % len(overvotes))
+                keep_going = True
+                exhausted |= set(overvotes.index)
+                votes = votes[~votes['Pref_Voter_Id'].isin(exhausted)]
+        rounds.append(top_votes)
+        # And count those votes by candidate
+        candidate_votes = \
+            top_votes.groupby('Candidate_Id').count().sort_values('Vote_Rank')
+
+        total_votes = candidate_votes.sum()['Vote_Rank']
+        top_vote_count = candidate_votes.iloc[
+            len(candidate_votes) - 1]['Vote_Rank']
+        if top_vote_count * 1.0 / total_votes > threshold:
+            winner = candidate_votes.index[len(candidate_votes) - 1]
+        else:
+            # eliminate last place and redistribute
+            eliminated = candidate_votes.index[0]
+            votes = votes[votes['Candidate_Id'] != eliminated]
+    return rounds, winner
