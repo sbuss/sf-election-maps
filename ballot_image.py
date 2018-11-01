@@ -169,8 +169,9 @@ def run_rcv_for_contest(
             if len(undervotes) > 0:
                 print("%d undervotes" % len(undervotes))
                 keep_going = True
-                ir = undervotes.iterrows()
+                
                 ## Slowest method
+                #ir = undervotes.iterrows()
                 #row = ir.next()
                 #x = votes[(votes.Pref_Voter_Id == row[0]) &
                 #          (votes.Vote_Rank == row[1].Vote_Rank)]
@@ -179,22 +180,12 @@ def run_rcv_for_contest(
                 #                  (votes.Vote_Rank == row[1].Vote_Rank)]
                 #votes = votes.drop(x.index, axis=0)
 
-                ## Slightly less slow method
-                qsp = []
-                for c, row in enumerate(ir):
-                    qsp.append('((votes.Pref_Voter_Id == %s) &'
-                               ' (votes.Vote_Rank == %s))' % (row[0], row[1].Vote_Rank))
-                    if c % 100 == 0:
-                        qs = "|".join(qsp)
-                        vv = votes[pd.eval(qs)]
-                        votes = votes.drop(vv.index, axis=0)
-                        qsp = []
-                if qsp:
-                    qs = "|".join(qsp)
-                    if len(undervotes) == 1:
-                        print(qs)
-                    vv = votes[pd.eval(qs)]
-                    votes = votes.drop(vv.index, axis=0)
+                # Fast method of the above
+                idxs = [(row[0], row[1].Vote_Rank)
+                        for row in undervotes.iterrows()]
+                drop_idxs = votes.reset_index().set_index(
+                    ["Pref_Voter_Id", "Vote_Rank"]).loc[idxs]["index"].values
+                votes = votes.drop(drop_idxs, axis=0)
 
             overvotes = top_votes[top_votes['Over_Vote'] == 1]
             if len(overvotes) > 0:
