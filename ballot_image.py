@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 import pandas as pd
 
 
@@ -104,6 +106,10 @@ def get_supervisor_votes(district, master_lookup_df, ballot_image_df):
         contest_name, master_lookup_df, ballot_image_df)
 
 
+RcvRound = namedtuple(
+    "RcvRound",
+    ["name", "votes", "num_undervotes", "num_overvotes", "dropped_candidate"])
+
 def run_rcv_for_contest(
         contest_name, master_lookup_df, ballot_image_df, threshold=0.5):
     """Run RCV elimination for a given contest.
@@ -144,20 +150,24 @@ def run_rcv_for_contest(
     # voted for candidates 188 #1 and 186 #2.
     winner = None
 
-    rounds = [votes]
+    # The zeroth round is the input data
+    rounds = [RcvRound("Original", votes, 0, 0, None)]
     # First remove all completely undervoted ballots. That's people who didn't
     # vote for anyone at all.
     _is_all_undervote = votes.groupby('Pref_Voter_Id')['Under_Vote'].all()
     all_undervote_voter_ids = _is_all_undervote[_is_all_undervote].index
     votes = votes[~votes.Pref_Voter_Id.isin(all_undervote_voter_ids)]
-    rounds.append(votes)
-    #votes = votes[votes.Under_Vote != 1]
-    #votes = votes[votes.Over_Vote != 1]
+    # The first round is all-undervotes dropped
+    rounds.append(
+        RcvRound("Round 0", votes, len(all_undervote_voter_ids), 0, None))
 
     # Start the ranking
     while not winner:
         print("Round %d" % len(rounds))
         keep_going = True
+        num_undervotes = 0
+        num_overvotes = 0
+        eliminated = None
         while keep_going:
             keep_going = False
             # Look at the highest rank vote for each voter.
@@ -167,6 +177,7 @@ def run_rcv_for_contest(
             # If the top choice is an undervote, drop it and keep going
             undervotes = top_votes[top_votes['Under_Vote'] == 1]
             if len(undervotes) > 0:
+                num_undervotes += len(undervotes)
                 print("%d undervotes" % len(undervotes))
                 keep_going = True
                 
@@ -189,11 +200,15 @@ def run_rcv_for_contest(
 
             overvotes = top_votes[top_votes['Over_Vote'] == 1]
             if len(overvotes) > 0:
+                num_overvotes += len(overvotes)
                 print("%d overvotes" % len(overvotes))
                 keep_going = True
+                # Mark all these voters as exhausted
+                # Note that overvotes' index is Pref_Voter_Id
                 exhausted |= set(overvotes.index)
+                # And remove those voters from the set of votes
                 votes = votes[~votes['Pref_Voter_Id'].isin(exhausted)]
-        rounds.append(top_votes)
+
         # And count those votes by candidate
         candidate_votes = \
             top_votes.groupby('Candidate_Id').count().sort_values('Vote_Rank')
@@ -207,4 +222,7 @@ def run_rcv_for_contest(
             # eliminate last place and redistribute
             eliminated = candidate_votes.index[0]
             votes = votes[votes['Candidate_Id'] != eliminated]
+        rounds.append(
+            RcvRound("Round %d" % (len(rounds) - 1), top_votes, num_undervotes,
+                num_overvotes, eliminated))
     return rounds, winner
