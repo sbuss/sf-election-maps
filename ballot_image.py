@@ -226,3 +226,33 @@ def run_rcv_for_contest(
             RcvRound("Round %d" % (len(rounds) - 1), top_votes, num_undervotes,
                 num_overvotes, eliminated))
     return rounds, winner
+
+def pretty_print_rcv_rounds(contest_name, master_lookup_df, rcv_rounds):
+    contest_id = master_lookup_df[
+        (master_lookup_df['Record_Type'] == 'Contest') &
+        (master_lookup_df['Description'] == contest_name)]['Id'].values[0]
+    id_to_candidate_name = dict(
+        master_lookup_df[
+            master_lookup_df['Candidates_Contest_Id'] == contest_id][
+                ['Id', 'Description']].values)
+
+    last_votes = {}
+    for rnd in rcv_rounds[0][2:]:
+        print(rnd.name)
+        id_to_vote_counts = dict(
+            rnd.votes.groupby('Candidate_Id')['Contest_Id'].count())
+        if not last_votes:
+            last_votes = id_to_vote_counts
+        total = sum(id_to_vote_counts.values())
+        for (vid, cnts) in sorted(id_to_vote_counts.iteritems()):
+            last_vote = last_votes.get(vid, 0)
+            last_vote_display = ""
+            if last_vote != cnts:
+                last_vote_display = "+%d" % (cnts - last_vote)
+            print("%30s %7d %6s %5.2f%%" %
+                (id_to_candidate_name[vid],
+                    cnts,
+                    last_vote_display,
+                    cnts * 100.0 / total))
+            last_votes[vid] = cnts
+        print
