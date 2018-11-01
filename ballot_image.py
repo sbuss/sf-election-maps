@@ -163,7 +163,7 @@ def run_rcv_for_contest(
 
     # Start the ranking
     while not winner:
-        print("Round %d" % len(rounds))
+        print("Round %d" % (len(rounds) - 1))
         keep_going = True
         num_undervotes = 0
         num_overvotes = 0
