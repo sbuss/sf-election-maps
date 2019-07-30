@@ -110,6 +110,7 @@ RcvRound = namedtuple(
     "RcvRound",
     ["name", "votes", "num_undervotes", "num_overvotes", "dropped_candidate"])
 
+
 def run_rcv_for_contest(
         contest_name, master_lookup_df, ballot_image_df, threshold=0.5):
     """Run RCV elimination for a given contest.
@@ -180,16 +181,15 @@ def run_rcv_for_contest(
                 num_undervotes += len(undervotes)
                 print("%d undervotes" % len(undervotes))
                 keep_going = True
-                
-                ## Slowest method
-                #ir = undervotes.iterrows()
-                #row = ir.next()
-                #x = votes[(votes.Pref_Voter_Id == row[0]) &
-                #          (votes.Vote_Rank == row[1].Vote_Rank)]
-                #for row in ir:
-                #    x = x | votes[(votes.Pref_Voter_Id == row[0]) &
-                #                  (votes.Vote_Rank == row[1].Vote_Rank)]
-                #votes = votes.drop(x.index, axis=0)
+                # ##### Slowest method #####
+                # ir = undervotes.iterrows()
+                # row = ir.next()
+                # x = votes[(votes.Pref_Voter_Id == row[0]) &
+                #           (votes.Vote_Rank == row[1].Vote_Rank)]
+                # for row in ir:
+                #     x = x | votes[(votes.Pref_Voter_Id == row[0]) &
+                #                   (votes.Vote_Rank == row[1].Vote_Rank)]
+                # votes = votes.drop(x.index, axis=0)
 
                 # Fast method of the above
                 idxs = [(row[0], row[1].Vote_Rank)
@@ -224,8 +224,9 @@ def run_rcv_for_contest(
             votes = votes[votes['Candidate_Id'] != eliminated]
         rounds.append(
             RcvRound("Round %d" % (len(rounds) - 1), top_votes, num_undervotes,
-                num_overvotes, eliminated))
+                     num_overvotes, eliminated))
     return rounds, winner
+
 
 def pretty_print_rcv_rounds(contest_name, master_lookup_df, rcv_rounds):
     contest_id = master_lookup_df[
@@ -250,9 +251,9 @@ def pretty_print_rcv_rounds(contest_name, master_lookup_df, rcv_rounds):
             if last_vote != cnts:
                 last_vote_display = "+%d" % (cnts - last_vote)
             print("%30s %7d %6s %5.2f%%" %
-                (id_to_candidate_name[vid],
-                    cnts,
-                    last_vote_display,
-                    cnts * 100.0 / total))
+                  (id_to_candidate_name[vid],
+                      cnts,
+                      last_vote_display,
+                      cnts * 100.0 / total))
             last_votes[vid] = cnts
         print
